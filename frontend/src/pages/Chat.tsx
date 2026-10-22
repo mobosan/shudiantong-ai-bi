@@ -1,0 +1,21 @@
+import { useEffect, useRef, useState } from 'react';
+import { Alert, Button, Input, Spin, Tag } from 'antd';
+import { ArrowUpOutlined, ArrowRightOutlined, BulbOutlined, PlusOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
+import { api } from '../api/client';
+import type { Catalog, HistoryItem, QueryResult, User } from '../types';
+import ResultCard from '../components/ResultCard';
+
+export default function Chat({user}:{user:User}) {
+  const [examples,setExamples]=useState<string[]>([]); const [messages,setMessages]=useState<HistoryItem[]>([]);
+  const [question,setQuestion]=useState(''); const [busy,setBusy]=useState(false);const [loading,setLoading]=useState(true); const [error,setError]=useState('');
+  const bottom=useRef<HTMLDivElement>(null); const inFlight=useRef(false);
+  useEffect(()=>{let alive=true;Promise.all([api<Catalog>('/metadata/metrics'),api<HistoryItem[]>('/chat/history')]).then(([meta,history])=>{if(alive){setExamples(meta.examples.map(e=>e.question));setMessages(history);}}).catch(e=>{if(alive)setError(e.message);}).finally(()=>{if(alive)setLoading(false);});return ()=>{alive=false;};},[user.id]);
+  useEffect(()=>{if(messages.length)bottom.current?.scrollIntoView({behavior:'smooth',block:'end'});},[messages.length,busy]);
+  async function submit(text=question){if(!text.trim() || inFlight.current)return;inFlight.current=true;setBusy(true);setError('');setQuestion('');const id=Date.now();setMessages(prev=>[...prev,{id,question:text,status:'pending',created_at:new Date().toISOString(),response:null}]);try{const result=await api<QueryResult>('/chat/query',{method:'POST',body:JSON.stringify({question:text})});setMessages(prev=>prev.map(m=>m.id===id?{...m,status:'success',response:result}:m));}catch(e){setError((e as Error).message);setQuestion(text);setMessages(prev=>prev.map(m=>m.id===id?{...m,status:'error'}:m));}finally{inFlight.current=false;setBusy(false);}}
+  return <div className="chat-page"><div className="page-heading"><div><span className="eyebrow">ASK YOUR BUSINESS</span><h1>经营问题，直接问。</h1><p>用自然语言探索门店表现，每个答案都有数据依据。</p></div><Button icon={<PlusOutlined />} disabled={busy || loading} onClick={()=>{setMessages([]);setError('');}}>新对话</Button></div>
+    <div className="context-strip"><span><span className="live-dot"/> 零售经营数据集</span><span>销售 · 库存 · 会员</span><span><SafetyCertificateOutlined /> 权限已生效</span><Tag bordered={false}>离线规则 / 可选 LLM</Tag></div>
+    {loading?<div className="loading"><Spin /></div>:<>{messages.length===0?<><section className="welcome-card"><div className="welcome-icon"><BulbOutlined /></div><div><h2>今天，想了解生意的哪一面？</h2><p>从销售趋势到库存效率，选择一个问题开始探索。</p></div><span className="welcome-pattern">↗</span></section><div className="section-label">试着这样问 <span>点击即可分析</span></div><div className="example-grid">{examples.map((text,i)=><button key={text} className="example-card" disabled={busy} onClick={()=>submit(text)}><span className="example-number">0{i+1}</span><div><span className="example-topic">{['区域表现','销售诊断','库存效率','会员运营','品类洞察','门店健康'][i]}</span><p>{text}</p></div><ArrowRightOutlined /></button>)}</div><p className="data-note">示例数据覆盖最近 90 个完整自然日。无去年同期、进店客流或转化数据时，助手会明确说明。</p></>:<div className="messages">{messages.map(m=><article key={m.id}><div className="question-bubble"><span>你</span><p>{m.question}</p></div>{m.response?<ResultCard result={m.response}/>:m.status==='pending'?<div className="thinking"><Spin size="small"/> 正在解析指标、核验权限并查询数据…</div>:<Alert type="error" message="这次查询未完成。调整问题后可以重试。"/>}</article>)}</div>}</>}
+    {error&&<Alert closable onClose={()=>setError('')} type="error" showIcon message={error} />}
+    <div ref={bottom}/><div className="composer-wrap"><div className="composer"><Input.TextArea aria-label="输入经营问题" placeholder="例如：最近30天各品类销售额排行" autoSize={{minRows:2,maxRows:5}} maxLength={1000} value={question} onChange={e=>setQuestion(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();submit();}}}/><div className="composer-bottom"><span>中文问数 <span className="composer-sep">·</span> Enter 发送，Shift + Enter 换行</span><Button type="primary" aria-label="发送问题" icon={<ArrowUpOutlined/>} loading={busy} disabled={!question.trim()||loading} onClick={()=>submit()}>发送</Button></div></div><p className="composer-hint">结论依据查询结果生成 · SQL 只读执行 · 查询过程可追溯</p></div>
+  </div>;
+}

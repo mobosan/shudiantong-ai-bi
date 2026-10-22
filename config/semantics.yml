@@ -1,0 +1,83 @@
+version: 1
+metrics:
+  sales_amount:
+    label: 销售额
+    synonyms: [销售额, 营业额, 销售收入, GMV]
+    expression: SUM(i.amount)
+    unit: 元
+    default_aggregation: sum
+    source: sales
+    definition: 期间订单明细实付金额之和；示例不含退款，品类/商品维度只计匹配明细。
+  order_count:
+    label: 订单数
+    synonyms: [订单数, 单量, 订单量]
+    expression: COUNT(DISTINCT o.id)
+    unit: 单
+    default_aggregation: count_distinct
+    source: sales
+    definition: 期间去重订单数；同一订单跨品类可分别计入，各分组不可直接相加。
+  avg_order_value:
+    label: 客单价
+    synonyms: [客单价, 单均金额]
+    expression: SUM(i.amount) / NULLIF(COUNT(DISTINCT o.id), 0)
+    unit: 元/单
+    default_aggregation: ratio
+    source: sales
+    definition: 销售额/去重订单数；品类/商品维度为该组明细金额/包含该组的订单数。
+  gross_margin:
+    label: 毛利率
+    synonyms: [毛利率, 利润率]
+    expression: 100.0 * SUM(i.amount - i.cost) / NULLIF(SUM(i.amount), 0)
+    unit: '%'
+    default_aggregation: ratio
+    source: sales
+    definition: （销售额－销售明细成本）/销售额×100%，未计租金、人工及税费。
+  sell_through:
+    label: 动销率
+    synonyms: [动销率, 动销]
+    expression: 100.0 * SUM(CASE WHEN a.product_id IS NOT NULL THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0)
+    unit: '%'
+    default_aggregation: ratio
+    source: inventory
+    definition: 期末有库存档案的门店商品组合中，期间有销售的组合占比。商品维度代表该商品在可见门店中的动销覆盖率；日期维度按每日计算。
+  stockout_rate:
+    label: 缺货率
+    synonyms: [缺货率, 缺货]
+    expression: 100.0 * SUM(CASE WHEN n.stock_qty <= 0 THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0)
+    unit: '%'
+    default_aggregation: ratio
+    source: inventory
+    definition: 期间每日库存快照中库存≤0的门店商品快照数/全部门店商品快照数×100%，按快照等权。
+  repurchase_rate:
+    label: 会员复购率
+    synonyms: [会员复购率, 复购率, 复购]
+    expression: 100.0 * SUM(CASE WHEN m.purchase_count >= 2 THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0)
+    unit: '%'
+    default_aggregation: ratio
+    source: members
+    definition: 期间在当前分组至少购买2次的会员数/至少购买1次的会员数×100%；仅限可见门店订单，非历史终身复购率。
+dimensions:
+  date: {label: 日期, synonyms: [每天, 每日, 趋势, 按日], field: 'DATE(o.order_time)', inventory_field: n.snapshot_date}
+  store: {label: 门店, synonyms: [各门店, 每家店, 门店, 各店], field: s.store_name}
+  region: {label: 区域, synonyms: [各区域, 区域], field: s.region}
+  city: {label: 城市, synonyms: [各城市, 城市], field: s.city}
+  category: {label: 品类, synonyms: [各品类, 品类, 分类], field: p.category}
+  product: {label: 商品, synonyms: [商品, SKU, 单品], field: p.product_name}
+  channel: {label: 渠道, synonyms: [渠道], field: o.channel}
+permissions:
+  store_manager: {field: s.id, user_attribute: store_id}
+  regional_manager: {field: s.region, user_attribute: region}
+  admin: {field: null, user_attribute: null}
+examples:
+  - question: 上周华东区哪个城市客单价掉得最厉害？跟去年同期比呢？
+    intent: {metrics: [avg_order_value], dimension: city, period: last_week, region: 华东区, comparison: year_over_year, rank_drop: true}
+  - question: 我店昨天销售额为什么下降？主要是客流少了还是转化率低了？
+    intent: {metrics: [sales_amount, order_count, avg_order_value], period: yesterday, comparison: previous}
+  - question: 本月动销率低于60%且库存大于30天的商品有哪些？
+    intent: {metrics: [sell_through], dimension: product, period: this_month, slow_inventory: true}
+  - question: 把华南区TOP10门店的会员复购率和客单价做成对比图。
+    intent: {metrics: [repurchase_rate, avg_order_value], dimension: store, period: last_30_days, region: 华南区, limit: 10}
+  - question: 最近30天各品类销售额排行。
+    intent: {metrics: [sales_amount], dimension: category, period: last_30_days}
+  - question: 上周各门店缺货率是多少？
+    intent: {metrics: [stockout_rate], dimension: store, period: last_week}
